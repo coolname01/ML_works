@@ -257,13 +257,21 @@ def build_candidates() -> list[Candidate]:
         Candidate(
             "CatBoost depth=6 iter=1000 (defaults)",
             "CatBoost",
-            lambda: CatBoostClassifier(iterations=1000, random_seed=SEED, verbose=0, thread_count=-1),
+            lambda: CatBoostClassifier(
+                iterations=1000, random_seed=SEED, verbose=0, thread_count=-1, allow_writing_files=False
+            ),
         ),
         Candidate(
             "CatBoost depth=4 lr=0.03 iter=1500",
             "CatBoost",
             lambda: CatBoostClassifier(
-                iterations=1500, depth=4, learning_rate=0.03, random_seed=SEED, verbose=0, thread_count=-1
+                iterations=1500,
+                depth=4,
+                learning_rate=0.03,
+                random_seed=SEED,
+                verbose=0,
+                thread_count=-1,
+                allow_writing_files=False,
             ),
         ),
         Candidate(
