@@ -1,0 +1,25 @@
+model,family,features,validation_auc,fit_seconds,selectable
+Blend(LightGBM + HistGradientBoosting + CatBoost + ExtraTrees),Blend,engineered,0.9338,27.6,True
+Blend(LightGBM + HistGradientBoosting + CatBoost),Blend,engineered,0.9332,23.4,True
+Blend(LightGBM + HistGradientBoosting + XGBoost + CatBoost + ExtraTrees + RandomForest),Blend,engineered,0.9321,63.5,True
+Blend(LightGBM + HistGradientBoosting),Blend,engineered,0.932,8.0,True
+LightGBM lr=0.05 n=400 leaves=31 colsample=0.5,LightGBM,engineered,0.9314,1.8,True
+LightGBM lr=0.02 n=1000 leaves=15 colsample=0.3,LightGBM,engineered,0.9305,1.9,True
+HistGradientBoosting lr=0.05 iter=400 leaves=31,HistGradientBoosting,engineered,0.93,6.2,True
+LightGBM lr=0.03 n=800 leaves=15 colsample=0.2,LightGBM,engineered,0.9299,1.2,True
+CatBoost depth=4 lr=0.03 iter=1500,CatBoost,engineered,0.9297,15.4,True
+ExtraTrees 800 trees max_features=0.2,ExtraTrees,engineered,0.9292,4.2,True
+LightGBM lr=0.03 n=600 leaves=15 colsample=0.5,LightGBM,engineered,0.9291,1.8,True
+XGBoost depth=5 lr=0.03 n=600,XGBoost,engineered,0.929,4.6,True
+XGBoost depth=3 lr=0.03 n=600,XGBoost,engineered,0.9272,2.6,True
+HistGradientBoosting lr=0.03 iter=800 leaves=15,HistGradientBoosting,engineered,0.9262,6.5,True
+CatBoost depth=6 iter=1000 (defaults),CatBoost,engineered,0.9248,19.7,True
+LightGBM lr=0.03 n=600 leaves=7 colsample=0.3,LightGBM,engineered,0.923,0.7,True
+RandomForest 800 trees max_features=0.2,RandomForest,engineered,0.9217,31.3,True
+ExtraTrees 800 trees max_features=sqrt,ExtraTrees,engineered,0.9214,1.8,True
+HistGradientBoosting lr=0.05 iter=300 leaves=7,HistGradientBoosting,engineered,0.92,1.4,True
+RandomForest 800 trees max_features=sqrt,RandomForest,engineered,0.9178,6.0,True
+LogisticRegression C=0.01 (reference only),LogisticRegression,engineered,0.9175,0.3,False
+DecisionTree depth=3 leaf=20,DecisionTree,engineered,0.8645,0.3,True
+DecisionTree depth=6 leaf=20,DecisionTree,engineered,0.8513,0.6,True
+DecisionTree depth=3 leaf=20 (notebook baseline),DecisionTree,raw,0.7473,0.3,True
