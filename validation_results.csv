@@ -1,25 +1,41 @@
-model,family,features,validation_auc,fit_seconds,selectable
-Blend(LightGBM + HistGradientBoosting + CatBoost + ExtraTrees),Blend,engineered,0.9338,27.6,True
-Blend(LightGBM + HistGradientBoosting + CatBoost),Blend,engineered,0.9332,23.4,True
-Blend(LightGBM + HistGradientBoosting + XGBoost + CatBoost + ExtraTrees + RandomForest),Blend,engineered,0.9321,63.5,True
-Blend(LightGBM + HistGradientBoosting),Blend,engineered,0.932,8.0,True
-LightGBM lr=0.05 n=400 leaves=31 colsample=0.5,LightGBM,engineered,0.9314,1.8,True
-LightGBM lr=0.02 n=1000 leaves=15 colsample=0.3,LightGBM,engineered,0.9305,1.9,True
-HistGradientBoosting lr=0.05 iter=400 leaves=31,HistGradientBoosting,engineered,0.93,6.2,True
-LightGBM lr=0.03 n=800 leaves=15 colsample=0.2,LightGBM,engineered,0.9299,1.2,True
-CatBoost depth=4 lr=0.03 iter=1500,CatBoost,engineered,0.9297,15.4,True
-ExtraTrees 800 trees max_features=0.2,ExtraTrees,engineered,0.9292,4.2,True
-LightGBM lr=0.03 n=600 leaves=15 colsample=0.5,LightGBM,engineered,0.9291,1.8,True
-XGBoost depth=5 lr=0.03 n=600,XGBoost,engineered,0.929,4.6,True
-XGBoost depth=3 lr=0.03 n=600,XGBoost,engineered,0.9272,2.6,True
-HistGradientBoosting lr=0.03 iter=800 leaves=15,HistGradientBoosting,engineered,0.9262,6.5,True
-CatBoost depth=6 iter=1000 (defaults),CatBoost,engineered,0.9248,19.7,True
-LightGBM lr=0.03 n=600 leaves=7 colsample=0.3,LightGBM,engineered,0.923,0.7,True
-RandomForest 800 trees max_features=0.2,RandomForest,engineered,0.9217,31.3,True
-ExtraTrees 800 trees max_features=sqrt,ExtraTrees,engineered,0.9214,1.8,True
-HistGradientBoosting lr=0.05 iter=300 leaves=7,HistGradientBoosting,engineered,0.92,1.4,True
-RandomForest 800 trees max_features=sqrt,RandomForest,engineered,0.9178,6.0,True
-LogisticRegression C=0.01 (reference only),LogisticRegression,engineered,0.9175,0.3,False
-DecisionTree depth=3 leaf=20,DecisionTree,engineered,0.8645,0.3,True
-DecisionTree depth=6 leaf=20,DecisionTree,engineered,0.8513,0.6,True
-DecisionTree depth=3 leaf=20 (notebook baseline),DecisionTree,raw,0.7473,0.3,True
+Модель,Признаки,Статус,ROC-AUC (train),ROC-AUC (валидация),"Время обучения, с","Время предсказания, с",seed,std по 5 seed
+Ранговое усреднение: Extra Trees (стекинг) + SVM,542 инженерных + оценка SVM; sqrt(512 расстояний) + 30 агрегатов,"референс, вне класса моделей задания",1.0,0.9492,6.11,0.292,20260916,
+"SVM с RBF-ядром (C=3, gamma=scale)",sqrt(512 расстояний) + 30 агрегатов,"референс, вне класса моделей задания",1.0,0.9481,0.79,0.197,20260916,
+"Extra Trees (800 деревьев, max_features=0.3)",542 инженерных + оценка SVM,кандидат,1.0,0.9463,5.32,0.095,20260916,0.0006
+"HistGradientBoosting (lr=0.05, 400 итераций, 31 лист)",542 инженерных + оценка SVM,кандидат,1.0,0.9459,4.93,0.007,20260916,
+"Случайный лес (800 деревьев, max_features=0.2)",542 инженерных + оценка SVM,кандидат,1.0,0.9455,27.13,0.097,20260916,
+"LightGBM (lr=0.05, 400 итераций, 31 лист, colsample=0.5)",542 инженерных + оценка SVM,кандидат,1.0,0.9432,2.74,0.005,20260916,
+"Extra Trees (800 деревьев, max_features=0.2)",542 инженерных + оценка SVM,кандидат,1.0,0.9432,3.68,0.096,20260916,
+Усреднение вероятностей: HistGradientBoosting + LightGBM + Extra Trees,512 исходных + 30 агрегатов,кандидат,1.0,0.933,9.02,0.066,20260916,0.0008
+"LightGBM (lr=0.05, 400 итераций, 31 лист, colsample=0.5)",512 исходных + 30 агрегатов,кандидат,1.0,0.9314,2.54,0.004,20260916,0.0018
+"LightGBM (lr=0.02, 1000 итераций, 15 листьев, colsample=0.3)",512 исходных + 30 агрегатов,кандидат,1.0,0.9305,2.41,0.008,20260916,
+"HistGradientBoosting (lr=0.05, 400 итераций, 31 лист)",512 исходных + 30 агрегатов,кандидат,1.0,0.93,4.66,0.007,20260916,0.0
+"LightGBM (lr=0.03, 800 итераций, 15 листьев, colsample=0.2)",512 исходных + 30 агрегатов,кандидат,1.0,0.9299,1.39,0.006,20260916,
+"Extra Trees (800 деревьев, max_features=0.3)",512 исходных + 30 агрегатов,кандидат,1.0,0.9294,5.36,0.107,20260916,
+"Extra Trees (800 деревьев, max_features=0.2)",512 исходных + 30 агрегатов,кандидат,1.0,0.9292,3.75,0.096,20260916,
+"LightGBM (lr=0.03, 600 итераций, 15 листьев, colsample=0.5)",512 исходных + 30 агрегатов,кандидат,1.0,0.9291,2.27,0.005,20260916,
+"Extra Trees (400 деревьев, max_features=0.2)",512 исходных + 30 агрегатов,кандидат,1.0,0.9281,1.82,0.055,20260916,0.0007
+"HistGradientBoosting (lr=0.03, 800 итераций, 15 листьев)",512 исходных + 30 агрегатов,кандидат,1.0,0.9262,4.75,0.012,20260916,
+"Extra Trees (400 деревьев, max_features=0.1)",512 исходных + 30 агрегатов,кандидат,1.0,0.9255,1.08,0.054,20260916,
+"LightGBM (lr=0.05, 400 итераций, 31 лист, colsample=0.5)",512 исходных,кандидат,1.0,0.9232,2.53,0.005,20260916,
+"LightGBM (lr=0.03, 600 итераций, 7 листьев, colsample=0.3)",512 исходных + 30 агрегатов,кандидат,0.9999,0.923,0.83,0.004,20260916,
+"Случайный лес (400 деревьев, max_features=0.2)",512 исходных + 30 агрегатов,кандидат,1.0,0.922,13.12,0.056,20260916,
+"Extra Trees (400 деревьев, max_features=sqrt)",512 исходных + 30 агрегатов,кандидат,1.0,0.9219,0.78,0.054,20260916,
+"Случайный лес (400 деревьев, max_features=0.1)",512 исходных + 30 агрегатов,кандидат,1.0,0.9204,6.37,0.055,20260916,
+"HistGradientBoosting (lr=0.05, 400 итераций, 31 лист)",512 исходных,кандидат,1.0,0.9202,4.6,0.007,20260916,
+"HistGradientBoosting (lr=0.05, 300 итераций, 7 листьев)",512 исходных + 30 агрегатов,кандидат,0.9997,0.92,1.1,0.004,20260916,
+"Случайный лес (400 деревьев, max_features=sqrt)",512 исходных + 30 агрегатов,кандидат,1.0,0.9179,2.65,0.054,20260916,0.0005
+"Случайный лес (800 деревьев, max_features=sqrt)",512 исходных + 30 агрегатов,кандидат,1.0,0.9178,5.43,0.095,20260916,
+"Логистическая регрессия (StandardScaler, C=0.01)",512 исходных + 30 агрегатов,"референс, вне класса моделей задания",0.9698,0.9175,0.54,0.002,20260916,
+"Extra Trees (400 деревьев, max_features=0.2)",512 исходных,кандидат,1.0,0.9164,2.21,0.055,20260916,
+GradientBoostingClassifier (параметры по умолчанию) — из первой попытки Задания 8,512 исходных,кандидат,0.9973,0.9051,22.4,0.002,20260916,
+"Случайный лес (200 деревьев, max_features=sqrt) — из первой попытки Задания 8",512 исходных,кандидат,1.0,0.9032,1.54,0.034,20260916,
+"Случайный лес (800 деревьев, max_features=sqrt)",512 исходных,кандидат,1.0,0.9009,5.03,0.096,20260916,
+Логистическая регрессия (max_iter=1000) — из первой попытки Задания 8,512 исходных,"референс, вне класса моделей задания",0.9807,0.8903,1.7,0.001,20260916,
+"Дерево решений (max_depth=3, min_samples_leaf=50) — лучшее в сетке",512 исходных + 30 агрегатов,кандидат,0.8927,0.8693,0.29,0.001,20260916,
+"Дерево решений (max_depth=3, min_samples_leaf=20) — базовая модель",512 исходных + 30 агрегатов,кандидат,0.8909,0.8645,0.3,0.001,20260916,
+Минус L1-сумма расстояний (без обучения),1 агрегат (L1-сумма),"референс, вне класса моделей задания",0.8362,0.8334,0.0,0.0,20260916,
+"Дерево решений (max_depth=8, min_samples_leaf=50) — лучшее в сетке",512 исходных,кандидат,0.8829,0.7947,0.46,0.001,20260916,
+"Дерево решений (max_depth=3, min_samples_leaf=20) — базовая модель",512 исходных,кандидат,0.7904,0.7473,0.28,0.001,20260916,
+"Дерево решений без ограничений (max_depth=None, min_samples_leaf=1)",512 исходных + 30 агрегатов,кандидат,1.0,0.7339,1.35,0.001,20260916,0.0086
+"Дерево решений без ограничений (max_depth=None, min_samples_leaf=1)",512 исходных,кандидат,1.0,0.6946,0.89,0.001,20260916,
