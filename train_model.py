@@ -7,7 +7,7 @@ easier by ~0.015 AUC. This pipeline therefore:
 
 * engineers distance aggregates plus L1-residual group sums (fitted on labeled
   rows only);
-* blends two RBF-SVMs with LightGBM and Extra Trees via rank averaging;
+* bags several RBF-SVMs (best family by train CV) and reports trees only as baselines;
 * selects that blend by 5-fold CV inside train.csv;
 * refits on train+validation and applies one conservative self-training round
   on high-confidence test rows before writing submission.csv.
@@ -231,21 +231,20 @@ def main():
     print(f"svm matrix {S_train.shape[1]} cols, tree matrix {T_train.shape[1]} cols")
 
     members = [
-        ("svm_C2_g1.5", S_train, S_val, lambda: svm_factory(1.5, 2.0)(S_train.shape[1])),
-        ("svm_C3_g2", S_train, S_val, lambda: svm_factory(2.0, 3.0)(S_train.shape[1])),
-        ("lgb_s0", T_train, T_val, lgb_factory(SEED)),
-        ("lgb_s1", T_train, T_val, lgb_factory(SEED + 1)),
-        ("lgb_s2", T_train, T_val, lgb_factory(SEED + 2)),
-        ("et_s0", T_train, T_val, et_factory(SEED)),
-        ("et_s1", T_train, T_val, et_factory(SEED + 1)),
-        ("et_s2", T_train, T_val, et_factory(SEED + 2)),
+        ("svm_C2_g1.5", S_train, S_val, lambda: svm_factory(1.5, 2.0)(S_train.shape[1]), True),
+        ("svm_C3_g1.5", S_train, S_val, lambda: svm_factory(1.5, 3.0)(S_train.shape[1]), True),
+        ("svm_C4_g1.5", S_train, S_val, lambda: svm_factory(1.5, 4.0)(S_train.shape[1]), True),
+        ("svm_C3_g2", S_train, S_val, lambda: svm_factory(2.0, 3.0)(S_train.shape[1]), True),
+        ("lgb_s0", T_train, T_val, lgb_factory(SEED), False),
+        ("et_s0", T_train, T_val, et_factory(SEED), False),
     ]
 
     oof = {}
     val_scores = {}
+    in_blend = {}
     rows = []
     print("\n5-fold CV on train / full-train validation AUC")
-    for name, Xtr, Xv, make in members:
+    for name, Xtr, Xv, make, use in members:
         t0 = time.perf_counter()
         oof[name] = oof_scores(make, Xtr, y_train)
         model = make()
@@ -254,55 +253,43 @@ def main():
         cv = roc_auc_score(y_train, oof[name])
         va = roc_auc_score(y_val, val_scores[name])
         sec = time.perf_counter() - t0
-        rows.append((name, cv, va, sec))
+        in_blend[name] = use
+        rows.append((name, cv, va, sec, use))
         print(f"  {name:12s}  cv={cv:.4f}  val={va:.4f}  {sec:5.1f}s", flush=True)
 
-    blend_oof = rank_mean(list(oof.values()))
-    blend_val = rank_mean(list(val_scores.values()))
+    blend_names = [name for name, use in in_blend.items() if use]
+    blend_oof = rank_mean([oof[name] for name in blend_names])
+    blend_val = rank_mean([val_scores[name] for name in blend_names])
     blend_cv = roc_auc_score(y_train, blend_oof)
     blend_va = roc_auc_score(y_val, blend_val)
-    print(f"  {'RANKBLEND':12s}  cv={blend_cv:.4f}  val={blend_va:.4f}")
-    rows.append(("rank_blend", blend_cv, blend_va, 0.0))
+    print(f"  {'SVM_BAG':12s}  cv={blend_cv:.4f}  val={blend_va:.4f}  members={blend_names}")
+    rows.append(("svm_bag", blend_cv, blend_va, 0.0, True))
 
-    table = pd.DataFrame(rows, columns=["model", "cv_train", "validation_auc", "seconds"])
+    table = pd.DataFrame(rows, columns=["model", "cv_train", "validation_auc", "seconds", "in_submission"])
     table = table.sort_values("cv_train", ascending=False).reset_index(drop=True)
     table.to_csv(args.results, index=False)
     print("\n" + table.to_string(index=False))
 
-    print("\nrefitting on train+validation")
+    print("\nrefitting SVM bag on train+validation")
     X_full = np.vstack([X_train, X_val])
     y_full = np.concatenate([y_train, y_val])
     feat = PairFeatures().fit(X_full, y_full)
-    S_full, T_full = feat.svm_matrix(X_full), feat.tree_matrix(X_full)
-    S_test, T_test = feat.svm_matrix(X_test), feat.tree_matrix(X_test)
-
-    full_members = [
-        ("svm_C2_g1.5", S_full, S_test, lambda: svm_factory(1.5, 2.0)(S_full.shape[1])),
-        ("svm_C3_g2", S_full, S_test, lambda: svm_factory(2.0, 3.0)(S_full.shape[1])),
-        ("lgb_s0", T_full, T_test, lgb_factory(SEED)),
-        ("lgb_s1", T_full, T_test, lgb_factory(SEED + 1)),
-        ("lgb_s2", T_full, T_test, lgb_factory(SEED + 2)),
-        ("et_s0", T_full, T_test, et_factory(SEED)),
-        ("et_s1", T_full, T_test, et_factory(SEED + 1)),
-        ("et_s2", T_full, T_test, et_factory(SEED + 2)),
+    S_full = feat.svm_matrix(X_full)
+    S_test = feat.svm_matrix(X_test)
+    svm_specs = [
+        ("svm_C2_g1.5", 1.5, 2.0),
+        ("svm_C3_g1.5", 1.5, 3.0),
+        ("svm_C4_g1.5", 1.5, 4.0),
+        ("svm_C3_g2", 2.0, 3.0),
     ]
 
-    fitted = {}
     test_raw = {}
-    for name, Xtr, Xte, make in full_members:
-        model = make()
-        model.fit(Xtr, y_full)
-        fitted[name] = model
-        test_raw[name] = predict_scores(model, Xte)
+    for name, gmul, C in svm_specs:
+        model = svm_factory(gmul, C)(S_full.shape[1])
+        model.fit(S_full, y_full)
+        test_raw[name] = predict_scores(model, S_test)
 
-    # Probability-scale scores for confident pseudo-labels (ranks are relative only).
-    proba_parts = []
-    for name, scores in test_raw.items():
-        if name.startswith("svm"):
-            proba_parts.append(expit(scores))
-        else:
-            proba_parts.append(scores)
-    test_proba = np.mean(proba_parts, axis=0)
+    test_proba = np.mean([expit(s) for s in test_raw.values()], axis=0)
     confident = (test_proba <= args.pseudo_low) | (test_proba >= args.pseudo_high)
     print(
         f"self-training: {confident.sum()} / {len(test_proba)} test rows "
@@ -314,23 +301,13 @@ def main():
         X_st = np.vstack([X_full, X_test[confident]])
         y_st = np.concatenate([y_full, y_pseudo])
         feat = PairFeatures().fit(X_st, y_st)
-        S_st, T_st = feat.svm_matrix(X_st), feat.tree_matrix(X_st)
-        S_test, T_test = feat.svm_matrix(X_test), feat.tree_matrix(X_test)
-        st_members = [
-            ("svm_C2_g1.5", S_st, S_test, lambda: svm_factory(1.5, 2.0)(S_st.shape[1])),
-            ("svm_C3_g2", S_st, S_test, lambda: svm_factory(2.0, 3.0)(S_st.shape[1])),
-            ("lgb_s0", T_st, T_test, lgb_factory(SEED)),
-            ("lgb_s1", T_st, T_test, lgb_factory(SEED + 1)),
-            ("lgb_s2", T_st, T_test, lgb_factory(SEED + 2)),
-            ("et_s0", T_st, T_test, et_factory(SEED)),
-            ("et_s1", T_st, T_test, et_factory(SEED + 1)),
-            ("et_s2", T_st, T_test, et_factory(SEED + 2)),
-        ]
+        S_st = feat.svm_matrix(X_st)
+        S_test = feat.svm_matrix(X_test)
         test_raw = {}
-        for name, Xtr, Xte, make in st_members:
-            model = make()
-            model.fit(Xtr, y_st)
-            test_raw[name] = predict_scores(model, Xte)
+        for name, gmul, C in svm_specs:
+            model = svm_factory(gmul, C)(S_st.shape[1])
+            model.fit(S_st, y_st)
+            test_raw[name] = predict_scores(model, S_test)
         print("self-training refit done")
 
     test_blend = rank_mean(list(test_raw.values()))
