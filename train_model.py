@@ -23,7 +23,6 @@ from pathlib import Path
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
-from scipy.special import expit
 from scipy.stats import rankdata
 from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.linear_model import LinearRegression
@@ -289,7 +288,7 @@ def main():
         model.fit(S_full, y_full)
         test_raw[name] = predict_scores(model, S_test)
 
-    test_proba = np.mean([expit(s) for s in test_raw.values()], axis=0)
+    test_proba = to_unit_interval(rank_mean(list(test_raw.values())))
     confident = (test_proba <= args.pseudo_low) | (test_proba >= args.pseudo_high)
     print(
         f"self-training: {confident.sum()} / {len(test_proba)} test rows "
