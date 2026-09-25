@@ -1,160 +1,218 @@
-# Hidden pairs: predicting shared latent identity with tree ensembles
+# Неделя 03 — Скрытые пары: деревья и ансамбли для предсказания общей скрытой сущности
 
-Each row of the competition data describes a pair of hidden observations through
-512 anonymous numerical features (`f0000` … `f0511`); `target = 1` means the two
-observations share the same latent identity. Submissions are scored with
-**ROC-AUC** (see `baseline_student-ru.ipynb`), so the model outputs the
-probability of the positive class rather than a hard label.
+Каждая строка данных описывает **пару скрытых наблюдений** 512 анонимными числовыми признаками
+(`f0000` … `f0511`); `target = 1` означает, что оба наблюдения относятся к одной скрытой сущности.
+Качество измеряется **ROC-AUC** (см. `baseline_student-ru.ipynb`), поэтому модель выдаёт вероятность
+класса 1, а не метку.
 
-## Data
+Итоговый артефакт — исполняемый ноутбук **`solution_student_ru.ipynb`**: «Restart kernel → Run all»
+заново обучает все модели, строит сводную таблицу и записывает `submission.csv`
+(1 116 строк, столбцы `row_id,target`). Все выводы ячеек сохранены в файле.
 
-| file | rows | columns | positives |
+## Результат кратко
+
+| | базовое дерево из ноутбука | итоговая модель |
+|---|---|---|
+| Модель | `DecisionTreeClassifier(max_depth=3, min_samples_leaf=20)` | `ExtraTreesClassifier(n_estimators=800, max_features=0.3)` на 542 инженерных признаках + стекинг-оценка `SVC(C=3, kernel="rbf")` |
+| ROC-AUC на валидации | 0.7473 | **0.9463** (по пяти seed 0.9461 ± 0.0006) |
+| Обучение | < 1 с | ≈ 10 с (SVM с вневыборочными оценками + Extra Trees) |
+| Файл отправки | `submission_baseline_tree.csv` | `submission.csv` |
+
+Все модели обучаются **только на `train.csv`**; `validation.csv` используется исключительно для сравнения
+и выбора, выборки не объединяются (правило из базового ноутбука).
+
+## Данные
+
+| файл | строк | столбцы | доля класса 1 |
 |---|---|---|---|
-| `train.csv` | 2 520 | `row_id`, 512 features, `target` | 50.0 % |
-| `validation.csv` | 560 | `row_id`, 512 features, `target` | 50.0 % |
-| `test.csv` | 1 116 | `row_id`, 512 features | – |
+| `train.csv` | 2 520 | `row_id`, 512 признаков, `target` | 50.0 % |
+| `validation.csv` | 560 | `row_id`, 512 признаков, `target` | 50.0 % |
+| `test.csv` | 1 116 | `row_id`, 512 признаков | – |
 | `sample_submission.csv` | 1 116 | `row_id`, `target` | – |
 
-There are no missing values, all features are `float64`, `row_id`s do not
-overlap between files, and the `row_id` order of `test.csv` matches
-`sample_submission.csv`. The validation split is separated from the training
-data at the level of the hidden entities, so it is used as the only local
-checkpoint; no random re-splitting or merging of the provided files is done.
+Пропусков нет, все признаки `float64`, `row_id` не пересекаются между файлами, порядок `row_id` в `test.csv`
+совпадает с `sample_submission.csv`.
 
-What exploration revealed about the features:
+Что показал раздел 8.1 ноутбука («Понимание данных»):
 
-* Every feature is non-negative and **all 512 features have a univariate
-  AUC below 0.5** (0.30–0.42): larger values always point towards "different
-  identity". Each column therefore behaves like a per-dimension distance
-  between the two hidden observations. There is no `a_i` / `b_i` half
-  structure (the correlation between `f_j` and `f_{j+256}` is no higher than
-  between arbitrary columns), so classical pairwise features (differences,
-  products, cosine similarity of two halves) do not apply.
-* The plain L1 distance (row sum) alone reaches validation AUC 0.833, versus
-  0.747 for the notebook's depth-3 decision tree on raw columns.
-* Dimensions are far from equally informative and are not conditionally
-  independent: naive-Bayes-style sums of per-dimension evidence stay at
-  ≈ 0.84 while discriminative models reach > 0.91. Imposing "monotone
-  decreasing" constraints on every feature hurt all boosting libraries by
-  ≈ 0.03 AUC, i.e. conditional on the overall distance some dimensions act as
-  *nuisance* dimensions (a large difference there makes a same-identity pair
-  more likely). Trees learn this on their own.
-* Per-row normalised profiles (`f_i / L1`) and within-row ranks added nothing
-  beyond noise, so they were left out.
+* Все признаки неотрицательны, и **у всех 512 признаков одномерный ROC-AUC меньше 0.5** (0.30–0.42):
+  чем больше значение, тем вероятнее «разные сущности». Каждый столбец ведёт себя как расстояние между
+  двумя скрытыми наблюдениями по одному измерению. Структуры «две половины `a_i` / `b_i`» нет, поэтому
+  классические парные признаки (разности, произведения, косинус) неприменимы.
+* Простая L1-сумма строки без какого-либо обучения даёт ROC-AUC 0.833 на валидации против 0.747
+  у базового дерева глубины 3.
+* Измерения информативны очень неравномерно: сумма по 64 самым «различающим» измерениям
+  (ранжирование по AUC на train) даёт 0.870.
 
-## Feature engineering
+## Признаки (раздел 8.2)
 
-Implemented in `PairDistanceFeatures` (`train_model.py`). Everything that is
-learned is fitted on `train.csv` only and then applied to validation and test.
+Всё, что подгоняется, подгоняется только на `train.csv` и затем применяется к валидации и тесту.
 
-1. **Raw features** – the 512 distance columns, unchanged.
-2. **Unsupervised row aggregates** (16 columns) describing the distance
-   profile of the pair: L1 and L2 norms, standard deviation, maximum,
-   quartiles and the 90th percentile, counts of dimensions below 0.1 / 0.5
-   and above 1 / 2, sum of logs, sum of square roots, mean of the 16 largest
-   and the 16 smallest values.
-3. **Train-fitted discriminability groups** (14 columns). Dimensions are
-   ranked by their univariate ROC-AUC on the training rows. For
-   `k ∈ {32, 64, 128, 256}` the sums over the `k` most and `k` least
-   discriminative dimensions and their ratio are added, plus weighted sums
-   with weights `(0.5 − AUC_i)^p`, `p ∈ {2, 4}`. The top-64 sum alone scores
-   0.870 on validation (L1: 0.833), and these columns lift LightGBM from
-   0.923 to 0.929 and HistGradientBoosting from 0.921 to 0.930 (same
-   hyper-parameters), because shallow trees cannot approximate a good
-   weighted distance with few splits on their own.
+1. **512 исходных** столбцов-расстояний без изменений.
+2. **16 агрегатов строки без обучения**: L1- и L2-нормы, стандартное отклонение, максимум, квартили и
+   90-й процентиль, число измерений ниже 0.1 / 0.5 и выше 1 / 2, суммы логарифмов и корней, средние по 16
+   наибольшим и 16 наименьшим значениям.
+3. **14 признаков по группам различимости, подогнанных на train**: измерения ранжируются по одномерному
+   ROC-AUC на train; для `k ∈ {32, 64, 128, 256}` берутся суммы по `k` самым и `k` наименее различающим
+   измерениям и их отношение, плюс взвешенные суммы с весами `(0.5 − AUC_i)^p`, `p ∈ {2, 4}`.
 
-Final matrix: 542 columns.
+Итого 542 столбца («512 исходных + 30 агрегатов»). Эти столбцы поднимают LightGBM с 0.923 до 0.931 и
+HistGradientBoosting с 0.920 до 0.930 при тех же гиперпараметрах: неглубокие деревья плохо приближают
+взвешенное расстояние небольшим числом разбиений.
 
-## Models and validation results
+## Ход исследования (Задание 8)
 
-All models are fitted on `train.csv` only and scored by ROC-AUC on
-`validation.csv`. Hyper-parameter variation was kept to a small hand-picked
-grid per family to avoid over-fitting the 560-row validation set. Blends are
-plain probability averages of the best configuration of each family. Logistic
-regression is listed only as the reference asked for by the notebook's
-task 8; it was never a candidate for selection.
+* **8.3. Одно дерево.** Сетка по глубине и `min_samples_leaf` на исходных и инженерных признаках.
+  На исходных лучшее дерево — глубина 8, лист 50: 0.795; дерево без ограничений — 0.695 при train 1.0
+  (разрыв 0.305). На инженерных дерево глубины 3 даёт 0.865–0.869; разрыв train–валидация растёт с глубиной,
+  `min_samples_leaf ≥ 50` держит его в пределах 0.09. Правила дерева глубины 3 распечатаны и объяснены.
+* **8.4. Ансамбли.** Одно дерево случайного леса — 0.658 ± 0.020 (исходные) / 0.728 ± 0.019 (инженерные);
+  5 деревьев — 0.794 / 0.866, 25 — 0.867 / 0.903, 100 — 0.898 / 0.914, 200 — 0.903 / 0.919, 400 и 800 —
+  плато 0.902 / 0.918. `max_features` sqrt → 0.1 → 0.2: случайный лес 0.918 → 0.920 → 0.922, Extra Trees
+  0.922 → 0.926 → 0.928; Extra Trees быстрее и при тех же параметрах немного точнее.
+* **8.5. Градиентный бустинг.** `GradientBoostingClassifier` из первой попытки Задания 8 — 0.905 (24 с здесь,
+  74 с в Colab). HistGradientBoosting: 0.920 на исходных, 0.930 на инженерных; LightGBM: 0.923 / 0.931.
+  Кривые по числу итераций: шаг 0.02 недообучается к 400 итерациям (0.928), 0.05 выходит на плато 0.930,
+  0.2 достигает пика 0.929 на ~100 итерациях и затем медленно ухудшается.
+* **8.6. Референсы вне класса моделей задания.** Логистическая регрессия (0.918) и **SVM с RBF-ядром** на
+  `sqrt(512 расстояний) + 30 агрегатов` после `StandardScaler`: `C` выбран 5-кратной кросс-валидацией
+  внутри train (C = 1 / 3 / 10 → 0.9238 / 0.9272 / 0.9260), на валидации **0.9481**. Гладкое ядро хорошо
+  описывает геометрию профиля расстояний, которую деревья приближают ступенчато.
+* **8.7. Стекинг.** Вневыборочная (5 стратифицированных фолдов) оценка SVM добавлена к 542 признакам как
+  543-й столбец. Extra Trees (800, `max_features=0.3`): 0.9294 → **0.9463**; HistGradientBoosting 0.9459;
+  случайный лес 0.9455; LightGBM 0.9432; Extra Trees `max_features=0.2` 0.9432. Парный бутстрэп по строкам
+  валидации (2 000 повторов): Extra Trees со стекингом − без стекинга = **+0.0169, 95 % интервал
+  [+0.0102; +0.0243]**, доля повторов с разницей ≤ 0 равна 0. Против SVM: −0.0018 [−0.0089; +0.0053];
+  ранговое усреднение Extra Trees + SVM (0.9492) против SVM: +0.0011 [−0.0027; +0.0049] — внутри шума.
+* **8.8. Устойчивость к seed.** Пять seed (`SEED + 0 … SEED + 4`): итоговая модель 0.9461 ± 0.0006;
+  усреднение HistGradientBoosting + LightGBM + Extra Trees без стекинга 0.9330 ± 0.0008; дерево без
+  ограничений 0.744 ± 0.009. HistGradientBoosting детерминирован при таком объёме данных (std 0).
+* **8.9–8.10. Сводная таблица и выбор.** Таблица ниже; выбор по качеству, устойчивости, времени и
+  воспроизводимости с оглядкой на шум оценки (бутстрэп-ошибка ROC-AUC на 560 строках ≈ 0.008–0.011).
+* **8.11–8.12. Итоговое обучение и воспроизводимость.** Итоговая модель обучается только на train,
+  предсказание для теста считается дважды и сравнивается на побитовое равенство, файл отправки проходит
+  проверки Задания 7.
 
-| model | family | features | validation AUC | fit time |
-|---|---|---|---|---|
-| **Blend(LightGBM + HistGradientBoosting + CatBoost + ExtraTrees)** | Blend | engineered | **0.9338** | 32.6 s |
-| Blend(LightGBM + HistGradientBoosting + CatBoost) | Blend | engineered | 0.9332 | 27.8 s |
-| Blend(LightGBM + HistGradientBoosting + XGBoost + CatBoost + ExtraTrees + RandomForest) | Blend | engineered | 0.9321 | 70.8 s |
-| Blend(LightGBM + HistGradientBoosting) | Blend | engineered | 0.9320 | 10.3 s |
-| LightGBM lr=0.05 n=400 leaves=31 colsample=0.5 | LightGBM | engineered | 0.9314 | 2.7 s |
-| LightGBM lr=0.02 n=1000 leaves=15 colsample=0.3 | LightGBM | engineered | 0.9305 | 2.5 s |
-| HistGradientBoosting lr=0.05 iter=400 leaves=31 | HistGradientBoosting | engineered | 0.9300 | 7.6 s |
-| LightGBM lr=0.03 n=800 leaves=15 colsample=0.2 | LightGBM | engineered | 0.9299 | 1.4 s |
-| CatBoost depth=4 lr=0.03 iter=1500 | CatBoost | engineered | 0.9297 | 17.5 s |
-| ExtraTrees 800 trees max_features=0.2 | ExtraTrees | engineered | 0.9292 | 4.8 s |
-| LightGBM lr=0.03 n=600 leaves=15 colsample=0.5 | LightGBM | engineered | 0.9291 | 2.1 s |
-| XGBoost depth=5 lr=0.03 n=600 | XGBoost | engineered | 0.9290 | 4.9 s |
-| XGBoost depth=3 lr=0.03 n=600 | XGBoost | engineered | 0.9272 | 3.3 s |
-| HistGradientBoosting lr=0.03 iter=800 leaves=15 | HistGradientBoosting | engineered | 0.9262 | 8.6 s |
-| CatBoost depth=6 iter=1000 (defaults) | CatBoost | engineered | 0.9248 | 27.1 s |
-| LightGBM lr=0.03 n=600 leaves=7 colsample=0.3 | LightGBM | engineered | 0.9230 | 0.9 s |
-| RandomForest 800 trees max_features=0.2 | RandomForest | engineered | 0.9217 | 33.2 s |
-| ExtraTrees 800 trees max_features=sqrt | ExtraTrees | engineered | 0.9214 | 1.9 s |
-| HistGradientBoosting lr=0.05 iter=300 leaves=7 | HistGradientBoosting | engineered | 0.9200 | 1.8 s |
-| RandomForest 800 trees max_features=sqrt | RandomForest | engineered | 0.9178 | 6.4 s |
-| LogisticRegression C=0.01 (reference only) | LogisticRegression | engineered | 0.9175 | 0.4 s |
-| DecisionTree depth=3 leaf=20 | DecisionTree | engineered | 0.8645 | 0.4 s |
-| DecisionTree depth=6 leaf=20 | DecisionTree | engineered | 0.8513 | 0.6 s |
-| DecisionTree depth=3 leaf=20 (notebook baseline) | DecisionTree | raw | 0.7473 | 0.3 s |
+## Сводная таблица экспериментов
 
-The same table is written to `validation_results.csv` by the script.
+Та же таблица записывается ноутбуком в `validation_results.csv` (столбцы на русском). ROC-AUC (train)
+у ансамблей равен 1.0 — деревья без ограничений глубины запоминают обучающую выборку; это не мешает
+качеству на валидации, но показывает, почему отбор по train бессмыслен. «Референс» — модели вне класса
+моделей задания (линейные, SVM, гибрид с SVM и оценка без обучения); итоговой может быть только «кандидат».
 
-### Chosen model
+| Модель | Признаки | Статус | ROC-AUC (train) | ROC-AUC (валидация) | Обучение, с | Предсказание, с | std по 5 seed |
+|---|---|---|---|---|---|---|---|
+| Ранговое усреднение: Extra Trees (стекинг) + SVM | 542 инженерных + оценка SVM; sqrt(512 расстояний) + 30 агрегатов | референс | 1.0000 | **0.9492** | 6.11 | 0.292 |  |
+| SVM с RBF-ядром (C=3, gamma=scale) | sqrt(512 расстояний) + 30 агрегатов | референс | 1.0000 | **0.9481** | 0.79 | 0.197 |  |
+| Extra Trees (800 деревьев, max_features=0.3) | 542 инженерных + оценка SVM | кандидат | 1.0000 | **0.9463** | 5.32 | 0.095 | 0.0006 |
+| HistGradientBoosting (lr=0.05, 400 итераций, 31 лист) | 542 инженерных + оценка SVM | кандидат | 1.0000 | **0.9459** | 4.93 | 0.007 |  |
+| Случайный лес (800 деревьев, max_features=0.2) | 542 инженерных + оценка SVM | кандидат | 1.0000 | **0.9455** | 27.13 | 0.097 |  |
+| LightGBM (lr=0.05, 400 итераций, 31 лист, colsample=0.5) | 542 инженерных + оценка SVM | кандидат | 1.0000 | **0.9432** | 2.74 | 0.005 |  |
+| Extra Trees (800 деревьев, max_features=0.2) | 542 инженерных + оценка SVM | кандидат | 1.0000 | **0.9432** | 3.68 | 0.096 |  |
+| Усреднение вероятностей: HistGradientBoosting + LightGBM + Extra Trees | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9330** | 9.02 | 0.066 | 0.0008 |
+| LightGBM (lr=0.05, 400 итераций, 31 лист, colsample=0.5) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9314** | 2.54 | 0.004 | 0.0018 |
+| LightGBM (lr=0.02, 1000 итераций, 15 листьев, colsample=0.3) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9305** | 2.41 | 0.008 |  |
+| HistGradientBoosting (lr=0.05, 400 итераций, 31 лист) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9300** | 4.66 | 0.007 | 0.0000 |
+| LightGBM (lr=0.03, 800 итераций, 15 листьев, colsample=0.2) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9299** | 1.39 | 0.006 |  |
+| Extra Trees (800 деревьев, max_features=0.3) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9294** | 5.36 | 0.107 |  |
+| Extra Trees (800 деревьев, max_features=0.2) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9292** | 3.75 | 0.096 |  |
+| LightGBM (lr=0.03, 600 итераций, 15 листьев, colsample=0.5) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9291** | 2.27 | 0.005 |  |
+| Extra Trees (400 деревьев, max_features=0.2) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9281** | 1.82 | 0.055 | 0.0007 |
+| HistGradientBoosting (lr=0.03, 800 итераций, 15 листьев) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9262** | 4.75 | 0.012 |  |
+| Extra Trees (400 деревьев, max_features=0.1) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9255** | 1.08 | 0.054 |  |
+| LightGBM (lr=0.05, 400 итераций, 31 лист, colsample=0.5) | 512 исходных | кандидат | 1.0000 | **0.9232** | 2.53 | 0.005 |  |
+| LightGBM (lr=0.03, 600 итераций, 7 листьев, colsample=0.3) | 512 исходных + 30 агрегатов | кандидат | 0.9999 | **0.9230** | 0.83 | 0.004 |  |
+| Случайный лес (400 деревьев, max_features=0.2) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9220** | 13.12 | 0.056 |  |
+| Extra Trees (400 деревьев, max_features=sqrt) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9219** | 0.78 | 0.054 |  |
+| Случайный лес (400 деревьев, max_features=0.1) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9204** | 6.37 | 0.055 |  |
+| HistGradientBoosting (lr=0.05, 400 итераций, 31 лист) | 512 исходных | кандидат | 1.0000 | **0.9202** | 4.60 | 0.007 |  |
+| HistGradientBoosting (lr=0.05, 300 итераций, 7 листьев) | 512 исходных + 30 агрегатов | кандидат | 0.9997 | **0.9200** | 1.10 | 0.004 |  |
+| Случайный лес (400 деревьев, max_features=sqrt) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9179** | 2.65 | 0.054 | 0.0005 |
+| Случайный лес (800 деревьев, max_features=sqrt) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.9178** | 5.43 | 0.095 |  |
+| Логистическая регрессия (StandardScaler, C=0.01) | 512 исходных + 30 агрегатов | референс | 0.9698 | **0.9175** | 0.54 | 0.002 |  |
+| Extra Trees (400 деревьев, max_features=0.2) | 512 исходных | кандидат | 1.0000 | **0.9164** | 2.21 | 0.055 |  |
+| GradientBoostingClassifier (параметры по умолчанию) — из первой попытки Задания 8 | 512 исходных | кандидат | 0.9973 | **0.9051** | 22.40 | 0.002 |  |
+| Случайный лес (200 деревьев, max_features=sqrt) — из первой попытки Задания 8 | 512 исходных | кандидат | 1.0000 | **0.9032** | 1.54 | 0.034 |  |
+| Случайный лес (800 деревьев, max_features=sqrt) | 512 исходных | кандидат | 1.0000 | **0.9009** | 5.03 | 0.096 |  |
+| Логистическая регрессия (max_iter=1000) — из первой попытки Задания 8 | 512 исходных | референс | 0.9807 | **0.8903** | 1.70 | 0.001 |  |
+| Дерево решений (max_depth=3, min_samples_leaf=50) — лучшее в сетке | 512 исходных + 30 агрегатов | кандидат | 0.8927 | **0.8693** | 0.29 | 0.001 |  |
+| Дерево решений (max_depth=3, min_samples_leaf=20) — базовая модель | 512 исходных + 30 агрегатов | кандидат | 0.8909 | **0.8645** | 0.30 | 0.001 |  |
+| Минус L1-сумма расстояний (без обучения) | 1 агрегат (L1-сумма) | референс | 0.8362 | **0.8334** | 0.00 | 0.000 |  |
+| Дерево решений (max_depth=8, min_samples_leaf=50) — лучшее в сетке | 512 исходных | кандидат | 0.8829 | **0.7947** | 0.46 | 0.001 |  |
+| Дерево решений (max_depth=3, min_samples_leaf=20) — базовая модель | 512 исходных | кандидат | 0.7904 | **0.7473** | 0.28 | 0.001 |  |
+| Дерево решений без ограничений (max_depth=None, min_samples_leaf=1) | 512 исходных + 30 агрегатов | кандидат | 1.0000 | **0.7339** | 1.35 | 0.001 | 0.0086 |
+| Дерево решений без ограничений (max_depth=None, min_samples_leaf=1) | 512 исходных | кандидат | 1.0000 | **0.6946** | 0.89 | 0.001 |  |
 
-**Probability average of the best LightGBM, HistGradientBoosting, CatBoost and
-ExtraTrees configurations, all fitted on `train.csv` only** — validation
-ROC-AUC **0.9338** (baseline tree: 0.7473).
+## Итоговая модель и обоснование
 
-Why this one:
+```python
+svm = make_pipeline(StandardScaler(), SVC(C=3, kernel="rbf", gamma="scale"))
+# вневыборочная оценка decision_function по StratifiedKFold(5, shuffle=True, random_state=SEED) для train,
+# полная подгонка на train — для валидации и теста
+final_model = ExtraTreesClassifier(n_estimators=800, max_features=0.3, n_jobs=-1, random_state=20260916)
+```
 
-* It has the highest validation AUC, and blending four differently built
-  ensembles (leaf-wise boosting, histogram boosting, symmetric-tree ordered
-  boosting, randomised bagging) reduces the variance of any single
-  configuration, which matters with only 2 520 training rows.
-* Every strong single model sits between 0.929 and 0.931. A bootstrap of the
-  validation set gives a standard error of ≈ 0.011 AUC, so these models are
-  statistically indistinguishable; the blend is preferred for robustness
-  rather than for the 0.002–0.004 nominal gain. Picking the best of ~20
-  configurations on 560 rows also carries a small optimistic bias, which is
-  another reason to favour an average over a single winner.
-* Runtime is modest: the whole comparison plus the final prediction takes
-  about two minutes on 4 CPU cores.
+Вход Extra Trees — 542 инженерных признака + один столбец с оценкой SVM (543 столбца). ROC-AUC на
+валидации **0.9463**, по пяти seed 0.9461 ± 0.0006, бутстрэп-ошибка оценки 0.008.
 
-`submission.csv` was produced by this blend fitted on `train.csv` only, in
-line with the notebook's rule not to merge the provided splits. Refitting the
-selected configuration on train + validation before predicting test is
-available through `--refit-on-train-val` but is off by default; when used,
-the validation score above still refers to the train-only fit and can no
-longer be re-measured for the refitted models.
+* **Выигрыш от стекинга статистически надёжен**: +0.0169 с интервалом [+0.010; +0.024] — единственное
+  изменение в исследовании, которое вывело деревья за пределы плато 0.925–0.935.
+* **Остаётся в классе моделей задания**: предсказывает ансамбль деревьев, SVM — лишь источник одного
+  признака. В таблице сохранены оценки без стекинга (Extra Trees 0.929, HistGradientBoosting 0.930).
+* **Просто, быстро, воспроизводимо**: только scikit-learn, ≈ 10 с обучения вместе с SVM, результат не
+  зависит от числа потоков, разброс по seed 0.0006.
+* **Соседи по таблице не лучше**: HistGradientBoosting (0.9459) и случайный лес (0.9455) на тех же
+  признаках отличаются на 0.0004–0.0008 — в десять раз меньше ошибки оценки; выбрана самая быстрая и
+  наименее чувствительная к гиперпараметрам (лес в пять раз медленнее).
+* **SVM (0.9481) и гибрид (0.9492) не выбраны**: разница внутри шума, а модели вне класса задания.
 
-## How to run
+Оговорки: валидация — 560 строк, `max_features` и сравнение с соседями сделаны по ней же, поэтому 0.946
+слегка оптимистично; уверенно утверждать можно, что стекинг даёт ≈ +0.015 и итоговое качество лежит
+примерно в 0.93–0.96 — значение 0.95 этой выборкой не подтверждается и не опровергается. Публичный
+лидерборд Kaggle считается на части теста и отличается от валидации (базовое дерево: 0.7473 против
+ориентировочных 0.7216).
+
+## Как запустить
 
 ```bash
 python3 -m pip install -r requirements.txt
-python3 train_model.py            # from the directory containing the four CSV files
+# из каталога с четырьмя CSV-файлами:
+jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=3600 solution_student_ru.ipynb
 ```
 
-Options: `--data-dir DIR` (default `.`), `--submission PATH` (default
-`submission.csv`), `--results PATH` (default `validation_results.csv`),
-`--refit-on-train-val` (see above). All seeds are fixed (`SEED = 20260916`);
-repeated runs produce a byte-identical `submission.csv`.
+или откройте ноутбук в Jupyter и выполните «Kernel → Restart kernel and Run all cells». Полный прогон
+занимает около 6 минут на 4 ядрах и создаёт `submission_baseline_tree.csv` (базовое дерево),
+`validation_results.csv` и `submission.csv` (итоговая модель). Повторный запуск даёт байт в байт тот же
+`submission.csv`.
 
-The script prints the shapes and class balance, the validation AUC of every
-candidate, the selected configuration, and validates the submission (two
-columns, 1 116 rows, `row_id` order identical to `sample_submission.csv`,
-unique ids, no missing values, probabilities in `[0, 1]`).
+Воспроизводимость: `SEED = 20260916` задаёт `random.seed`, `np.random.seed`, все `random_state` и генераторы
+бутстрэпа. Итоговая модель (libsvm + Extra Trees) детерминирована при любом числе потоков. LightGBM участвует
+только в сравнении: его результаты повторяются при `deterministic=True`, `force_row_wise=True` и том же числе
+потоков (`n_jobs=4`); при другом числе потоков значения ROC-AUC могут отличаться в последних знаках.
 
-## Files
+Версии, с которыми получены результаты: Python 3.12.3, numpy 2.4.4, pandas 3.0.6, scikit-learn 1.9.1,
+lightgbm 4.7.0, jupyter 1.1.1, nbconvert 7.17.1, ipykernel 7.3.0 (закреплены в `requirements.txt`).
 
-| file | purpose |
+## Загрузка на Kaggle
+
+Подробно — в разделе 10 ноутбука. Кратко: `submission.csv` загружается через «Submit Predictions» на
+странице соревнования или через API:
+
+```bash
+kaggle competitions submit -c <competition-slug> -f submission.csv -m "ExtraTrees + SVM stack, val AUC 0.946"
+```
+
+Для запуска внутри Kaggle Notebook замените `DATA_DIR = Path(".")` на
+`DATA_DIR = Path("/kaggle/input/<competition-slug>")` и сохраняйте файлы в `/kaggle/working/`.
+
+## Файлы
+
+| файл | назначение |
 |---|---|
-| `train_model.py` | full pipeline: load → features → validation comparison → final fit → `submission.csv` |
-| `requirements.txt` | pinned library versions |
-| `submission.csv` | test predictions of the selected model (1 116 rows) |
-| `validation_results.csv` | results table produced by the last run |
-| `baseline_student-ru.ipynb` | original baseline notebook (unchanged) |
-| `train.csv`, `validation.csv`, `test.csv`, `sample_submission.csv` | competition data (unchanged) |
+| `solution_student_ru.ipynb` | итоговый ноутбук: Задания 1–7 базового ноутбука + исследование Задания 8, с сохранёнными выводами |
+| `requirements.txt` | закреплённые версии библиотек |
+| `submission.csv` | предсказания итоговой модели для теста (1 116 строк) |
+| `submission_baseline_tree.csv` | предсказания базового дерева (Задание 7) |
+| `validation_results.csv` | сводная таблица экспериментов, записанная последним прогоном |
+| `baseline_student-ru.ipynb` | исходный базовый ноутбук (без изменений) |
+| `train.csv`, `validation.csv`, `test.csv`, `sample_submission.csv` | данные соревнования (без изменений) |
